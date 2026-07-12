@@ -40,12 +40,13 @@ module Sourced
     UnknownMessageError = Class.new(ArgumentError)
     # Raised by {#at} when a message would be scheduled in the past.
     PastMessageDateError = Class.new(ArgumentError)
+    LaxTime = Types::Time | Types::String.build(::Time, :parse).policy(:rescue, ::ArgumentError)
 
     attribute :id, Types::AutoUUID
     attribute :type, Types::String.present
     attribute? :causation_id, Types::UUID::V4
     attribute? :correlation_id, Types::UUID::V4
-    attribute :created_at, Types::Forms::Time.default { Time.now }
+    attribute :created_at, LaxTime.default { Time.now }
     attribute :metadata, Types::Hash.default(Plumb::BLANK_HASH)
     attribute :payload, Types::Static[nil]
 
