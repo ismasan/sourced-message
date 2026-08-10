@@ -22,7 +22,7 @@ module Sourced
   # +Sourced::Message.registry[type]+ resolves a type registered under any
   # subclass. Resolve from this root to see the whole tree.
   class Message < Plumb::Types::Data
-    VERSION = '0.2.0'
+    VERSION = '0.2.1'
 
     EMPTY_ARRAY = [].freeze
 
