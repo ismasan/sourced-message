@@ -10,6 +10,7 @@ A message is a [Plumb](https://github.com/ismasan/plumb)-typed value object with
 - `causation_id` / `correlation_id` for tracing causal chains across processes
 - arbitrary `metadata`
 - a global **type registry** that can reconstruct any message from a plain hash — handy for transports, queues and event stores
+- **codecs** that serialize messages to JSON or to form params and back, preserving the types each payload declares
 - scheduling helpers (`#at` / `#in`) for delayed messages
 
 Messages are immutable: every "mutating" method (`#with_payload`, `#with_metadata`, `#at`, `#correlate`) returns a copy.
@@ -126,6 +127,190 @@ Sourced::Message.registry.keys          # => ["course.created", "student.enroll"
 Sourced::Message.registry.all.to_a      # => [CourseCreated, EnrollStudent, ...]
 Sourced::Message.registry['course.created'] # => CourseCreated
 ```
+
+### Serialization: codecs
+
+`.from` rebuilds the right class from a hash, but it does **not** translate values. Message types are declared with native Ruby types, and JSON has no `Date`, `Time`, `Symbol` or `BigDecimal` — so a naive `to_h` → JSON → `.from` round trip quietly hands back strings:
+
+```ruby
+CourseCreated = Sourced::Message.define('course.created') do
+  attribute :course_name, String
+  attribute :starts_on, Sourced::Message::Types::Date
+  attribute :level, Sourced::Message::Types::Symbol
+end
+
+msg = CourseCreated.new(
+  payload: { course_name: 'Ruby 101', starts_on: Date.new(2026, 9, 1), level: :beginner }
+)
+
+back = Sourced::Message.from(JSON.parse(JSON.dump(msg.to_h), symbolize_names: true))
+back.payload.starts_on # => "2026-09-01"  (a String!)
+back.payload.level     # => "beginner"    (a String!)
+back.valid?            # => false
+```
+
+Nothing raises along the way, because `.new` does not validate. The message is simply wrong, and you find out somewhere else entirely.
+
+A codec closes that gap. It compiles a `[decoder, encoder]` pair per registered message type and translates values in both directions. Two ship, differing only in the wire format they bind:
+
+| Class | Format | For |
+|---|---|---|
+| `Sourced::Message::JSONCodec` | `Plumb::Codec::JSON` | stores, queues, socket frames, files |
+| `Sourced::Message::FormsCodec` | `Plumb::Codec::Forms` | HTML form params and query strings |
+
+Both inherit their machinery from `Sourced::Message::Codec`, which is abstract — it has no format of its own and exists to be subclassed (or handed a `format:` for a one-off).
+
+```ruby
+codec = Sourced::Message::JSONCodec.default.compile!
+
+encoded = codec.encode(msg)
+# => { id: "8f1c…", causation_id: "8f1c…", correlation_id: "8f1c…",
+#      created_at: "2026-09-01T10:00:00.000000+01:00", metadata: {}, type: "course.created",
+#      payload: { course_name: "Ruby 101", starts_on: "2026-09-01", level: "beginner" } }
+
+decoded = codec.decode(JSON.parse(JSON.dump(encoded), symbolize_names: true))
+decoded.payload.starts_on # => #<Date: 2026-09-01>
+decoded.payload.level     # => :beginner
+```
+
+`#encode` returns JSON-native structures — Hashes, Arrays, Strings, numbers, booleans, `nil` — ready for `JSON.dump`. The codec never writes bytes itself, so the transport decides how they are stored or framed.
+
+#### Compiling is explicit
+
+A codec has no pairs until it is compiled, and it never compiles itself on first use. Compile once, wherever your process considers boot to be over and every message class has loaded:
+
+```ruby
+codec = Sourced::Message::JSONCodec.default
+codec.compiled?   # => false
+codec.compile!    # => the codec, pairs built and frozen
+codec.encode(msg) # ready
+```
+
+This is also the **boot check**. A message type the format cannot represent raises at `compile!`, naming the offending attribute, instead of failing on the first message that happens to carry it:
+
+```ruby
+Sourced::Message.define('reports.generated') { attribute :result, Plumb::Types::Any }
+Sourced::Message::JSONCodec.default.compile!
+# => Plumb::TypeError: cannot apply Plumb::Codec::JSON[…] (decode) to …:
+#    field `payload.result` (Plumb::Types::Any) matches no encoder and is not
+#    covered by its noop types. Register an encoder for it, or declare it with .noop.
+```
+
+The path is dotted from the message root, so `payload.result` points straight at the attribute to fix.
+
+`#compile!` is **idempotent**, so several collaborators sharing one codec can each call it on start without coordinating. A type registered *after* a compile stays invisible until you ask for a rebuild:
+
+```ruby
+codec.compile!    # cheap no-op once compiled
+codec.recompile!  # rebuild, picking up types and encoders registered since
+```
+
+#### Errors
+
+| Raised by | When |
+|---|---|
+| `Plumb::TypeError` | `#compile!` — a message type this format cannot represent |
+| `JSONCodec::EncodeError` | `#encode` — the message does not satisfy its own schema |
+| `JSONCodec::DecodeError` | `#decode` — the encoded values no longer fit the schema (a schema change, a hand-edited record, a foreign writer) |
+| `JSONCodec::UnregisteredTypeError` | either — nothing has compiled yet, or this type was not in the compiled set |
+| `Sourced::Message::UnknownMessageError` | `#decode` — the type string is not in the registry at all |
+
+`EncodeError` and `DecodeError` name the offending type and message id, so a bad record is findable.
+
+#### Teaching it your own types
+
+The format is `Plumb::Codec::JSON`, a process-wide global. Register an encoder on it and every codec in the process learns the type at once:
+
+```ruby
+Money = Data.define(:cents, :currency)
+
+class MoneyEncoder < Plumb::Encoder[
+  Plumb::Types::String[/\A-?\d+ [A-Z]{3}\z/] => Plumb::Types::Any[Money]
+]
+  def encode(money) = "#{money.cents} #{money.currency}"
+
+  def decode(str)
+    cents, currency = str.split
+    Money.new(cents: cents.to_i, currency:)
+  end
+end
+
+Plumb::Codec::JSON.encoder(MoneyEncoder)
+```
+
+Register at load time. A codec compiled before an encoder arrives never sees it.
+
+Note the constraint this creates: every message class in the registry must be encodable by the format, because `#compile!` walks all of them. A type carrying a value the format knows nothing about fails the compile for everyone.
+
+#### Decoding form params: `FormsCodec`
+
+Form params carry no types — every scalar arrives as a String. `FormsCodec` lets the message's own schema do the coercion a web handler would otherwise do by hand:
+
+```ruby
+codec = Sourced::Message::FormsCodec.default.compile!
+
+msg = codec.decode(
+  id: SecureRandom.uuid,
+  type: 'course.created',
+  created_at: Time.now.iso8601(6),
+  metadata: {},
+  payload: { course_name: 'Ruby 101', seats: '30', starts_on: '2026-09-01' }
+)
+
+msg.payload.seats     # => 30                  (Integer, from "30")
+msg.payload.starts_on # => #<Date: 2026-09-01> (from "2026-09-01")
+```
+
+Encoding renders the mirror image — every scalar a String — which is what a form needs to round-trip a message back to the browser.
+
+#### Encoding something other than the whole message
+
+`JSONCodec` encodes the entire message, envelope included, which suits a transport that carries one message as one document — a file body, a socket frame. A store that keeps the envelope in columns wants only the payload encoded. Subclass and override three private seams:
+
+```ruby
+class PayloadOnlyCodec < Sourced::Message::JSONCodec
+  private
+
+  # What Plumb type to compile for a message class.
+  def compiled_type(klass)
+    schema = klass._schema.to_h
+    schema[schema.keys.find { |k| k.to_sym == :payload }]
+  end
+
+  # What #encode feeds the encoder.
+  def encode_subject(message) = message.payload
+
+  # What #decode returns.
+  def build(klass, attrs, decoder)
+    klass.new(attrs.merge(payload: decoder.parse(attrs[:payload])))
+  end
+end
+```
+
+This is exactly what `Sourced::Store::MessageCodec` does. Subclasses get their own `.default` and pair cache automatically — which they need, since one message class compiles to a different pair on each side.
+
+#### Sharing, resetting and the pair cache
+
+`.default` is the shared instance, so a process compiles its pairs once. `.reset!` drops it — for tests between examples, and for a development-mode class reloader:
+
+```ruby
+Sourced::Message::JSONCodec.default   # the shared instance
+Sourced::Message::JSONCodec.reset!    # next .default compiles afresh
+```
+
+Compiled pairs are cached per message class on the codec class and **survive `reset!`**, because building a pair is the whole cost of a compile and a class that did not change does not need a new one. Redefining a type produces a new class, which misses the cache and compiles fresh. `.clear_pairs!` forces a cold rebuild — needed only for a class whose schema changed *in place*, which `.reset!` cannot detect since the class is the same object.
+
+A codec can also be scoped to its own set of encoders, or to a private registry:
+
+```ruby
+class AuditFormat < Plumb::Codec::JSON
+  encoder RedactedEmailEncoder
+end
+
+Sourced::Message::JSONCodec.new(format: AuditFormat, registry: my_registry).compile!
+```
+
+`registry:` needs only `#all(&block)` and `#[](type)` — that is the whole contract.
 
 ### Copying with changes
 

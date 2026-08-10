@@ -22,7 +22,7 @@ module Sourced
   # +Sourced::Message.registry[type]+ resolves a type registered under any
   # subclass. Resolve from this root to see the whole tree.
   class Message < Plumb::Types::Data
-    VERSION = '0.1.1'
+    VERSION = '0.2.0'
 
     EMPTY_ARRAY = [].freeze
 
@@ -270,3 +270,8 @@ module Sourced
   class Command < Message; end
   class Event < Message; end
 end
+
+# Required here so `require 'sourced/message'` gives you the whole gem.
+require 'sourced/message/codec'
+require 'sourced/message/json_codec'
+require 'sourced/message/forms_codec'
