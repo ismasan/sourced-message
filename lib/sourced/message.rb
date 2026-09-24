@@ -22,7 +22,7 @@ module Sourced
   # +Sourced::Message.registry[type]+ resolves a type registered under any
   # subclass. Resolve from this root to see the whole tree.
   class Message < Plumb::Types::Data
-    VERSION = '0.2.2'
+    VERSION = '0.3.0'
 
     EMPTY_ARRAY = [].freeze
 
@@ -231,8 +231,33 @@ module Sourced
 
     alias in at
 
+    # Metadata key under which {#correlate} records the {#correlation_type}.
+    CORRELATION_TYPE_KEY = :correlation_type
+
+    # The type of the message at the root of this message's causal chain —
+    # the type counterpart of {#correlation_id}.
+    #
+    # A message that was not produced by {#correlate} is its own root, so
+    # this is its own {#type}. A correlated message inherits its source's
+    # +correlation_type+, so every consequence of a command — the events it
+    # produced, the commands those events triggered, their events in turn —
+    # answers with the originating command's type. This is what lets a
+    # subscriber that only knows the command it sent recognise everything
+    # that came of it, without knowing the shape of each downstream message.
+    #
+    # Setting +metadata[:correlation_type]+ explicitly on a message before it
+    # is correlated starts a new chain from it: the target's own metadata wins
+    # the merge in {#correlate}.
+    #
+    # @return [String] a message type string
+    def correlation_type
+      metadata.fetch(CORRELATION_TYPE_KEY, type)
+    end
+
     # Set causation and correlation IDs on another message, establishing
-    # a causal link from this message to +message+. Merges metadata.
+    # a causal link from this message to +message+. Merges metadata, with the
+    # target's keys winning, and records this message's {#correlation_type}
+    # under {CORRELATION_TYPE_KEY} unless the target already carries one.
     #
     # @param message [Message] the message to correlate
     # @return [Message] a copy of +message+ with causation/correlation set
@@ -241,11 +266,14 @@ module Sourced
     #   caused = source_event.correlate(SomeCommand.new(payload: { ... }))
     #   caused.causation_id  # => source_event.id
     #   caused.correlation_id # => source_event.correlation_id
+    #   caused.correlation_type # => source_event.correlation_type
     def correlate(message)
       attrs = {
         causation_id: id,
         correlation_id: correlation_id,
-        metadata: metadata.merge(message.metadata || Plumb::BLANK_HASH)
+        metadata: { CORRELATION_TYPE_KEY => correlation_type }
+          .merge(metadata)
+          .merge(message.metadata || Plumb::BLANK_HASH)
       }
       message.with(attrs)
     end

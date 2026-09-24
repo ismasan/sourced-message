@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.3.0]
+
+- Add `Sourced::Message#correlation_type`, the type counterpart of `correlation_id`:
+  the type of the message at the root of a causal chain. `#correlate` now records the
+  source's `correlation_type` under `metadata[:correlation_type]` on the target, so
+  every consequence of a command carries the command's type. A message that was never
+  correlated answers with its own `type`. A target whose metadata already holds a
+  `correlation_type` keeps it, which starts a new chain.
+- `Sourced::Message::VERSION` is now `0.3.0`.
+
 ## [0.2.0]
 
 - Add `Sourced::Message::Codec`, the abstract serializer: it compiles a

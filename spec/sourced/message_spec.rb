@@ -150,6 +150,29 @@ RSpec.describe Sourced::Message do
       expect(source.causation_id).to eq(source.id)
     end
 
+    it 'records the correlation type in the target metadata' do
+      source = msg_class.new(payload: { name: 'Joe', email: 'joe@example.com' })
+      target = bare_class.new
+      correlated = source.correlate(target)
+      expect(correlated.metadata).to include(correlation_type: source.type)
+      expect(correlated.correlation_type).to eq(source.type)
+    end
+
+    it 'propagates the correlation type down a chain of correlated messages' do
+      root = msg_class.new(payload: { name: 'Joe', email: 'joe@example.com' })
+      child = root.correlate(bare_class.new)
+      grandchild = child.correlate(bare_class.new)
+      expect(grandchild.correlation_type).to eq(root.type)
+      expect(grandchild.causation_id).to eq(child.id)
+    end
+
+    it 'lets a target with its own correlation type start a new chain' do
+      source = msg_class.new(payload: { name: 'Joe', email: 'joe@example.com' })
+      target = bare_class.new.with_metadata(correlation_type: 'other.root')
+      correlated = source.correlate(target)
+      expect(correlated.correlation_type).to eq('other.root')
+    end
+
     it 'preserves the target created_at (does not propagate from source)' do
       future = Time.now + 3600
       source = msg_class.new(payload: { name: 'Joe', email: 'joe@example.com' }).at(future)
@@ -157,6 +180,18 @@ RSpec.describe Sourced::Message do
       correlated = source.correlate(target)
       expect(correlated.created_at).to eq(target.created_at)
       expect(correlated.created_at).not_to eq(source.created_at)
+    end
+  end
+
+  describe '#correlation_type' do
+    it 'is the message own type when not correlated' do
+      msg = msg_class.new(payload: { name: 'Joe', email: 'joe@example.com' })
+      expect(msg.correlation_type).to eq(msg.type)
+    end
+
+    it 'reads an explicitly set correlation type from metadata' do
+      msg = bare_class.new.with_metadata(correlation_type: 'explicit.root')
+      expect(msg.correlation_type).to eq('explicit.root')
     end
   end
 
