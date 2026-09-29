@@ -22,7 +22,7 @@ module Sourced
   # +Sourced::Message.registry[type]+ resolves a type registered under any
   # subclass. Resolve from this root to see the whole tree.
   class Message < Plumb::Types::Data
-    VERSION = '0.3.0'
+    VERSION = '0.4.0'
 
     EMPTY_ARRAY = [].freeze
 
@@ -34,6 +34,15 @@ module Sourced
 
       # Accepts a UUID string or generates a new one when none is provided.
       AutoUUID = UUID::V4.default { SecureRandom.uuid }
+
+      # A JSON value, with Symbol-keyed objects at every depth. Typed all the way
+      # down so a codec decodes nested keys too. The self-references are deferred
+      # inside the union, not the constant itself: naming a type here freezes it,
+      # and a frozen Deferred can't materialize.
+      JSONValue = String | Numeric | Boolean | Nil |
+                  Array[Any.defer { JSONValue }] | Hash[Symbol, Any.defer { JSONValue }]
+
+      Metadata = Hash[Symbol, JSONValue]
     end
 
     # Raised by {.from} when a type string isn't registered.
@@ -47,7 +56,7 @@ module Sourced
     attribute? :causation_id, Types::UUID::V4
     attribute? :correlation_id, Types::UUID::V4
     attribute :created_at, LaxTime.default { Time.now }
-    attribute :metadata, Types::Hash.default(Plumb::BLANK_HASH)
+    attribute :metadata, Types::Metadata.default(Plumb::BLANK_HASH)
     attribute :payload, Types::Static[nil]
 
     # Lookup table mapping type strings to message subclasses.

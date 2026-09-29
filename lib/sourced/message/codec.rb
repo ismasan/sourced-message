@@ -182,22 +182,26 @@ module Sourced
       # Rebuild a message from decoded attributes. An unknown type raises: a process
       # reading types it doesn't know about is missing the class.
       #
-      # @param attrs [Hash] symbol-keyed message attributes
+      # @param attrs [Hash] message attributes, String- (as #encode emits them) or Symbol-keyed
       # @return [Sourced::Message]
       # @raise [UnknownMessageError] if the type isn't in the registry
       # @raise [UnregisteredTypeError] if the type was not compiled
       # @raise [DecodeError] if the attributes don't satisfy the schema
       def decode(attrs)
-        type = attrs[:type]
+        type = envelope(attrs, :type)
+        id = envelope(attrs, :id)
         klass = @registry[type]
-        raise UnknownMessageError, "Unknown message type: #{label(type, attrs[:id])}" unless klass
+        raise UnknownMessageError, "Unknown message type: #{label(type, id)}" unless klass
 
-        build(klass, attrs, pair(type, attrs[:id]).decoder)
+        build(klass, attrs, pair(type, id).decoder)
       rescue Plumb::ParseError => e
-        raise DecodeError, "cannot decode #{label(type, attrs[:id])}: #{e.message}"
+        raise DecodeError, "cannot decode #{label(type, id)}: #{e.message}"
       end
 
       private
+
+      # Read before the decoder runs, so it must accept both key forms the decoder does.
+      def envelope(attrs, key) = attrs.fetch(key) { attrs[key.to_s] }
 
       # --- subclass seams -------------------------------------------------------
 

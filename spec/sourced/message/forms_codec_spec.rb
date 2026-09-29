@@ -53,11 +53,11 @@ RSpec.describe Sourced::Message::FormsCodec do
 
   describe '#encode' do
     it 'renders every payload scalar as a String, which is what a form carries' do
-      payload = codec.encode(message)[:payload]
+      payload = codec.encode(message)['payload']
 
       expect(payload.values).to all(be_a(String))
-      expect(payload[:seats]).to eq('30')
-      expect(payload[:starts_on]).to eq('2026-09-01')
+      expect(payload['seats']).to eq('30')
+      expect(payload['starts_on']).to eq('2026-09-01')
     end
 
     it 'round-trips back to the declared types' do

@@ -35,18 +35,18 @@ RSpec.describe Sourced::Message::JSONCodec do
     it 'renders every payload value in the format, not just the envelope' do
       encoded = codec.encode(message)
 
-      expect(encoded[:payload][:at]).to eq('2025-01-01T00:00:00.000000Z')
-      expect(encoded[:payload][:on]).to eq('2026-01-02')
-      expect(encoded[:payload][:kind]).to eq('urgent')
-      expect(encoded[:payload][:count]).to eq(3) # JSON-native, passes through
+      expect(encoded['payload']['at']).to eq('2025-01-01T00:00:00.000000Z')
+      expect(encoded['payload']['on']).to eq('2026-01-02')
+      expect(encoded['payload']['kind']).to eq('urgent')
+      expect(encoded['payload']['count']).to eq(3) # JSON-native, passes through
     end
 
     it 'renders the envelope too, so the whole message is one native document' do
       encoded = codec.encode(message)
 
-      expect(encoded[:type]).to eq('codec_spec.rich')
-      expect(encoded[:id]).to eq(message.id)
-      expect(encoded[:created_at]).to be_a(String)
+      expect(encoded['type']).to eq('codec_spec.rich')
+      expect(encoded['id']).to eq(message.id)
+      expect(encoded['created_at']).to be_a(String)
       expect { JSON.generate(encoded) }.not_to raise_error
     end
 
@@ -77,6 +77,15 @@ RSpec.describe Sourced::Message::JSONCodec do
 
       expect(decoded.payload.at).to eq(message.payload.at)
       expect(decoded.payload.kind).to eq(:urgent)
+    end
+
+    it 'restores Symbol metadata keys at every depth, without symbolize_names' do
+      meta = { user_id: 42, ctx: { tags: ['a', { ok: true }], note: nil }, correlation_type: 'root.type' }
+      json = JSON.generate(codec.encode(message.with_metadata(meta)))
+      decoded = codec.decode(JSON.parse(json))
+
+      expect(decoded.metadata).to eq(meta)
+      expect(decoded.correlation_type).to eq('root.type')
     end
 
     it 'handles a message defined without a payload' do

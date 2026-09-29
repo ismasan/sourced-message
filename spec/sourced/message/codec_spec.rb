@@ -20,7 +20,7 @@ RSpec.describe Sourced::Message::Codec do
 
     it 'is usable directly when handed a format, for a one-off' do
       codec = described_class.new(format: Plumb::Codec::JSON, registry:).compile!
-      expect(codec.encode(plain.new(payload: { n: 1 }))[:payload]).to eq(n: 1)
+      expect(codec.encode(plain.new(payload: { n: 1 }))['payload']).to eq('n' => 1)
     end
   end
 

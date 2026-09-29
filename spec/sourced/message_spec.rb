@@ -67,6 +67,16 @@ RSpec.describe Sourced::Message do
       expect(msg.metadata).to eq({})
     end
 
+    it 'accepts JSON values in metadata, and nothing else' do
+      ok = msg_class.new(payload: { name: 'Joe', email: 'joe@example.com' },
+                         metadata: { n: 1, flag: false, list: ['a', { b: nil }] })
+      expect(ok).to be_valid
+
+      bad = msg_class.new(payload: { name: 'Joe', email: 'joe@example.com' }, metadata: { at: Time.now })
+      expect(bad).not_to be_valid
+      expect(bad.errors[:metadata]).not_to be_nil
+    end
+
     it 'defaults payload to nil when not provided' do
       msg = bare_class.new
       expect(msg.payload).to be_nil

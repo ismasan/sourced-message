@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+## [0.4.0]
+
+- Requires plumb 0.4, whose codecs rewrite Hash keys like values: `#encode` now emits
+  String keys (`{'type' => ..., 'payload' => {'name' => ...}}`), and decoders accept
+  String or Symbol keys. `JSON.dump` output is unchanged.
+- `Codec#decode` reads the envelope's `type` and `id` under either key form, so
+  `decode(encode(message))` works without a JSON round trip.
+- `metadata` is typed as `Types::Metadata`: Symbol keys and `Types::JSONValue` values
+  (String, Numeric, boolean, nil, and Arrays/Symbol-keyed Hashes of those, at any depth).
+  Codecs now restore nested metadata keys as Symbols. A non-JSON value (a Time, a
+  Symbol) makes the message invalid and fails `#encode`, where `JSON.dump` used to
+  stringify it silently.
+- `Sourced::Message::VERSION` is now `0.4.0`.
+
 ## [0.3.0]
 
 - Add `Sourced::Message#correlation_type`, the type counterpart of `correlation_id`:
