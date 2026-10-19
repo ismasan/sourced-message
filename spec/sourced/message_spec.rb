@@ -121,6 +121,42 @@ RSpec.describe Sourced::Message do
     end
   end
 
+  describe '#tags' do
+    it 'defaults to empty, on defined classes and on Command / Event subclasses' do
+      expect(msg_class.new(payload: { name: 'Joe', email: 'joe@example.com' }).tags).to eq({})
+      expect(Sourced::Command.define('spec.tags.cmd').new.tags).to eq({})
+      expect(Sourced::Event.define('spec.tags.evt').new.tags).to eq({})
+    end
+
+    it 'is not part of the payload' do
+      msg = msg_class.new(payload: { name: 'Joe', email: 'joe@example.com' }).with_tags(order_id: 'o1')
+      expect(msg.payload.to_h).to eq(name: 'Joe', email: 'joe@example.com')
+    end
+  end
+
+  describe '#with_tags' do
+    let(:msg) { msg_class.new(payload: { name: 'Joe', email: 'joe@example.com' }) }
+
+    it 'merges tags, stringifying values' do
+      tagged = msg.with_tags(order_id: 'o1').with_tags(line: 2)
+      expect(tagged.tags).to eq(order_id: 'o1', line: '2')
+      expect(tagged.id).to eq(msg.id)
+      expect(msg.tags).to eq({})
+    end
+
+    it 'returns self when given no tags' do
+      expect(msg.with_tags).to equal(msg)
+    end
+
+    it 'accepts a tag equal to a payload attribute' do
+      expect(msg.with_tags(name: 'Joe').tags).to eq(name: 'Joe')
+    end
+
+    it 'raises when a tag names a payload attribute with a different value' do
+      expect { msg.with_tags(name: 'Ann') }.to raise_error(Sourced::Message::TagConflictError, /name/)
+    end
+  end
+
   describe '#with_payload' do
     it 'returns a copy with merged payload attributes' do
       msg = msg_class.new(payload: { name: 'Joe', email: 'joe@example.com' })
@@ -131,6 +167,15 @@ RSpec.describe Sourced::Message do
   end
 
   describe '#correlate' do
+    it "keeps the target's tags and copies none of the source's" do
+      source = msg_class.new(payload: { name: 'Joe', email: 'joe@example.com' }).with_tags(order_id: 'o1')
+      target = msg_class.new(payload: { name: 'Ann', email: 'ann@example.com' }).with_tags(line_id: 'l1')
+      untagged = msg_class.new(payload: { name: 'Bob', email: 'bob@example.com' })
+
+      expect(source.correlate(target).tags).to eq(line_id: 'l1')
+      expect(source.correlate(untagged).tags).to eq({})
+    end
+
     it 'sets causation_id to the source message id' do
       source = msg_class.new(payload: { name: 'Joe', email: 'joe@example.com' })
       target = bare_class.new

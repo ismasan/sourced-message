@@ -22,7 +22,7 @@ module Sourced
   # +Sourced::Message.registry[type]+ resolves a type registered under any
   # subclass. Resolve from this root to see the whole tree.
   class Message < Plumb::Types::Data
-    VERSION = '0.4.0'
+    VERSION = '0.5.0'
 
     EMPTY_ARRAY = [].freeze
 
@@ -43,10 +43,15 @@ module Sourced
                   Array[Any.defer { JSONValue }] | Hash[Symbol, Any.defer { JSONValue }]
 
       Metadata = Hash[Symbol, JSONValue]
+
+      # Key/value pairs a store can index alongside the payload's. Values are Strings.
+      Tags = Hash[Symbol, String]
     end
 
     # Raised by {.from} when a type string isn't registered.
     UnknownMessageError = Class.new(ArgumentError)
+    # Raised by {#with_tags} when a tag names a payload attribute with a different value.
+    TagConflictError = Class.new(ArgumentError)
     # Raised by {#at} when a message would be scheduled in the past.
     PastMessageDateError = Class.new(ArgumentError)
     LaxTime = Types::Time | Types::String.build(::Time, :parse).policy(:rescue, ::ArgumentError)
@@ -57,6 +62,9 @@ module Sourced
     attribute? :correlation_id, Types::UUID::V4
     attribute :created_at, LaxTime.default { Time.now }
     attribute :metadata, Types::Metadata.default(Plumb::BLANK_HASH)
+    # Envelope, not payload: {#correlate} leaves the target's tags alone, so they
+    # never pass on to messages produced in reaction.
+    attribute :tags, Types::Tags.default(Plumb::BLANK_HASH)
     attribute :payload, Types::Static[nil]
 
     # Lookup table mapping type strings to message subclasses.
@@ -198,6 +206,27 @@ module Sourced
       return self if meta.empty?
 
       with(metadata: metadata.merge(meta))
+    end
+
+    # A copy with +tags+ merged in, values stringified.
+    #
+    # @param tags [Hash{Symbol => #to_s}]
+    # @return [Message]
+    # @raise [TagConflictError] if a tag names a payload attribute with a different value
+    def with_tags(**tags)
+      return self if tags.empty?
+
+      tags = tags.transform_values(&:to_s)
+      declared = self.class.payload_attribute_names
+      tags.each do |key, value|
+        next unless declared.include?(key)
+        next if payload[key].to_s == value
+
+        raise TagConflictError,
+              "#{type} tag #{key}: #{value.inspect} conflicts with its payload value #{payload[key].inspect}"
+      end
+
+      with(tags: self.tags.merge(tags))
     end
 
     def with_payload(attrs = {})

@@ -9,11 +9,12 @@ A message is a [Plumb](https://github.com/ismasan/plumb)-typed value object with
 - an auto-generated `id` and `created_at` timestamp
 - `causation_id` / `correlation_id` for tracing causal chains across processes
 - arbitrary `metadata`
+- `tags`: key/value pairs for a store to index, outside the payload
 - a global **type registry** that can reconstruct any message from a plain hash — handy for transports, queues and event stores
 - **codecs** that serialize messages to JSON or to form params and back, preserving the types each payload declares
 - scheduling helpers (`#at` / `#in`) for delayed messages
 
-Messages are immutable: every "mutating" method (`#with_payload`, `#with_metadata`, `#at`, `#correlate`) returns a copy.
+Messages are immutable: every "mutating" method (`#with_payload`, `#with_metadata`, `#with_tags`, `#at`, `#correlate`) returns a copy.
 
 ## Installation
 
@@ -69,6 +70,7 @@ msg.id            # => "5f6e..."  (auto-generated UUID)
 msg.type          # => "course.created"
 msg.created_at    # => 2026-06-06 12:00:00 ... (defaults to Time.now)
 msg.metadata      # => {}
+msg.tags          # => {}
 msg.causation_id  # => same as msg.id by default
 msg.correlation_id # => same as msg.id by default
 ```
@@ -165,7 +167,7 @@ codec = Sourced::Message::JSONCodec.default.compile!
 
 encoded = codec.encode(msg)
 # => { id: "8f1c…", causation_id: "8f1c…", correlation_id: "8f1c…",
-#      created_at: "2026-09-01T10:00:00.000000+01:00", metadata: {}, type: "course.created",
+#      created_at: "2026-09-01T10:00:00.000000+01:00", metadata: {}, tags: {}, type: "course.created",
 #      payload: { course_name: "Ruby 101", starts_on: "2026-09-01", level: "beginner" } }
 
 decoded = codec.decode(JSON.parse(JSON.dump(encoded), symbolize_names: true))
@@ -321,6 +323,11 @@ Messages are immutable. Use the `#with_*` helpers to derive new copies:
 tagged = msg.with_metadata(channel: 'web', user_id: '42')
 tagged.metadata # => { channel: 'web', user_id: '42' }
 
+# Merge tags: String values, outside the payload (keeps the same id).
+# A tag naming a payload attribute must match its value, or it raises TagConflictError.
+scoped = msg.with_tags(school_id: 's1')
+scoped.tags # => { school_id: 's1' }
+
 # Override payload attributes
 updated = msg.with_payload(seats: 25)
 updated.payload.seats # => 25
@@ -329,7 +336,7 @@ updated.payload.course_name # => "Ruby 101" (unchanged)
 
 ### Correlation: tracing causal chains
 
-`#correlate` links one message as the cause of another. It returns a copy of the target with `causation_id` set to the source's `id` and `correlation_id` propagated from the source. Metadata from both messages is merged.
+`#correlate` links one message as the cause of another. It returns a copy of the target with `causation_id` set to the source's `id` and `correlation_id` propagated from the source. Metadata from both messages is merged. Tags are not: the copy keeps the target's own.
 
 ```ruby
 trigger = EnrollStudent.new(payload: { student_id: '42' })

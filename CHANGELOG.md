@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [0.5.0]
+
+- `Message#tags`: an envelope attribute (`Types::Tags`, Symbol keys and String values,
+  empty by default) holding key/value pairs a store can index alongside the payload's,
+  without the message class declaring them. Codecs encode and decode it with the rest
+  of the envelope.
+- `#with_tags(**tags)` returns a copy with tags merged in, values stringified. It raises
+  `TagConflictError` when a tag names a payload attribute with a different value.
+- `#correlate` leaves the target's tags alone: tags never pass on to messages produced
+  in reaction, unlike metadata.
+- `Sourced::Message::VERSION` is now `0.5.0`.
+
 ## [0.4.0]
 
 - Requires plumb 0.4, whose codecs rewrite Hash keys like values: `#encode` now emits

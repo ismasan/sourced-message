@@ -88,6 +88,11 @@ RSpec.describe Sourced::Message::JSONCodec do
       expect(decoded.correlation_type).to eq('root.type')
     end
 
+    it 'round-trips tags' do
+      json = JSON.generate(codec.encode(message.with_tags(order_id: 'o1')))
+      expect(codec.decode(JSON.parse(json)).tags).to eq(order_id: 'o1')
+    end
+
     it 'handles a message defined without a payload' do
       expect(codec.decode(codec.encode(empty.new)).type).to eq('codec_spec.empty')
     end
