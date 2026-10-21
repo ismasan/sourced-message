@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+- `Message::Registry` raises `DuplicateTypeError` when two classes with different names
+  claim one type string, instead of silently replacing the registered class. Registering
+  a type again is still allowed when the names are equal (a code reloader redefining a
+  constant) or either class is anonymous (throwaway classes in specs; a constant in an
+  anonymous module counts as anonymous until the module is named). `.define`
+  registers a class before it's assigned to its constant, so the comparison waits until
+  the new class has a name: the next registration of the type, its lookup (`[]`,
+  `Message.from`, codec `decode`) or `#all` (codec `compile!`) raises.
+
 ## [0.5.0]
 
 - `Message#tags`: an envelope attribute (`Types::Tags`, Symbol keys and String values,

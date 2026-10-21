@@ -342,6 +342,97 @@ RSpec.describe Sourced::Message do
       msg_class # ensure registered
       expect(Sourced::Message.registry.keys).to include('spec.user_created')
     end
+
+    describe 'registering a type again' do
+      let(:root) { Class.new(Sourced::Message) }
+      let(:registry) { root.registry }
+
+      def named(const, klass)
+        stub_const("RegistrySpec::#{const}", klass)
+      end
+
+      it 'raises on lookup once a differently named class holds the type' do
+        named(:Foo, root.define('spec.registry.dup'))
+        named(:Bar, root.define('spec.registry.dup'))
+
+        expect { registry['spec.registry.dup'] }.to raise_error(
+          Sourced::Message::DuplicateTypeError,
+          'message type "spec.registry.dup" is claimed by both RegistrySpec::Foo and RegistrySpec::Bar'
+        )
+      end
+
+      it 'raises from #all' do
+        named(:Foo, root.define('spec.registry.dup'))
+        named(:Bar, root.define('spec.registry.dup'))
+
+        expect { registry.all.to_a }.to raise_error(Sourced::Message::DuplicateTypeError)
+      end
+
+      it 'raises from the root registry' do
+        named(:Foo, root.define('spec.registry.dup'))
+        named(:Bar, root.define('spec.registry.dup'))
+
+        expect { Sourced::Message.registry['spec.registry.dup'] }.to raise_error(Sourced::Message::DuplicateTypeError)
+      end
+
+      it 'raises on the next registration of the type' do
+        named(:Foo, root.define('spec.registry.dup'))
+        named(:Bar, root.define('spec.registry.dup'))
+
+        expect { root.define('spec.registry.dup') }.to raise_error(Sourced::Message::DuplicateTypeError)
+      end
+
+      it 'raises right away for a named class, keeping the registered one' do
+        foo = named(:Foo, root.define('spec.registry.dup'))
+        bar = named(:Bar, Class.new(root))
+
+        expect { registry['spec.registry.dup'] = bar }.to raise_error(Sourced::Message::DuplicateTypeError)
+        expect(registry['spec.registry.dup']).to equal(foo)
+      end
+
+      it 'raises past anonymous classes registered in between' do
+        named(:Foo, root.define('spec.registry.dup'))
+        root.define('spec.registry.dup')
+        named(:Bar, root.define('spec.registry.dup'))
+
+        expect { registry['spec.registry.dup'] }.to raise_error(Sourced::Message::DuplicateTypeError)
+      end
+
+      it 'replaces a class redefined under the same name, as a reloader does' do
+        named(:Foo, root.define('spec.registry.dup'))
+        reloaded = named(:Foo, root.define('spec.registry.dup'))
+
+        expect(registry['spec.registry.dup']).to equal(reloaded)
+      end
+
+      it 'replaces an anonymous class' do
+        root.define('spec.registry.dup')
+        foo = named(:Foo, root.define('spec.registry.dup'))
+
+        expect(registry['spec.registry.dup']).to equal(foo)
+      end
+
+      it 'treats a constant in an anonymous module as anonymous until the module is named' do
+        named(:Foo, root.define('spec.registry.dup'))
+        namespace = Module.new
+        namespace.const_set(:Bar, root.define('spec.registry.dup'))
+
+        expect(registry['spec.registry.dup']).to equal(namespace::Bar)
+
+        named(:Namespace, namespace)
+        expect { registry['spec.registry.dup'] }.to raise_error(
+          Sourced::Message::DuplicateTypeError, /RegistrySpec::Foo and RegistrySpec::Namespace::Bar/
+        )
+      end
+
+      it 'is replaced by an anonymous class' do
+        named(:Foo, root.define('spec.registry.dup'))
+        anonymous = root.define('spec.registry.dup')
+
+        expect(registry['spec.registry.dup']).to equal(anonymous)
+        expect(registry.all.to_a).to eq([anonymous])
+      end
+    end
   end
 
   describe 'Command and Event' do

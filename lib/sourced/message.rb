@@ -54,6 +54,8 @@ module Sourced
     TagConflictError = Class.new(ArgumentError)
     # Raised by {#at} when a message would be scheduled in the past.
     PastMessageDateError = Class.new(ArgumentError)
+    # Raised by {Registry} when two classes with different names claim one type string.
+    DuplicateTypeError = Class.new(ArgumentError)
     LaxTime = Types::Time | Types::String.build(::Time, :parse).policy(:rescue, ::ArgumentError)
 
     attribute :id, Types::AutoUUID
@@ -68,11 +70,19 @@ module Sourced
     attribute :payload, Types::Static[nil]
 
     # Lookup table mapping type strings to message subclasses.
+    #
+    # Registering a type again replaces its class: a code reloader redefines a
+    # constant, and specs define throwaway anonymous messages reusing type
+    # strings. Two classes with different permanent names claiming one type are
+    # a bug, and raise {DuplicateTypeError}. {.define} registers a class before
+    # it's assigned to its constant, so the replaced class is kept until its
+    # successor has a name, and compared on the next registration or lookup.
     class Registry
       # @param message_class [Class] the root message class for this registry
       def initialize(message_class)
         @message_class = message_class
         @lookup = {}
+        @replaced = {}
       end
 
       # @return [Array<String>] registered type strings
@@ -85,7 +95,14 @@ module Sourced
       #
       # @param key [String] message type string
       # @param klass [Class] message subclass
+      # @raise [DuplicateTypeError] if a class with a different name holds the type
       def []=(key, klass)
+        check!(key)
+        previous = @lookup[key]
+        if previous && named(previous) && !previous.equal?(klass)
+          duplicate!(key, previous, klass) if named(klass) && named(klass) != named(previous)
+          @replaced[key] = previous unless named(klass)
+        end
         @lookup[key] = klass
       end
 
@@ -94,7 +111,9 @@ module Sourced
       #
       # @param key [String] message type string
       # @return [Class, nil]
+      # @raise [DuplicateTypeError] if a class with a different name holds the type
       def [](key)
+        check!(key) unless @replaced.empty?
         klass = lookup[key]
         return klass if klass
 
@@ -109,9 +128,11 @@ module Sourced
       #
       # @return [Enumerator<Class>] if no block given
       # @yield [Class] each registered message class
+      # @raise [DuplicateTypeError] if a class with a different name holds a type
       def all(&block)
         return enum_for(:all) unless block
 
+        @replaced.keys.each { |key| check!(key) }
         lookup.each_value(&block)
         subclasses.each { |c| c.registry.all(&block) }
       end
@@ -119,6 +140,29 @@ module Sourced
       private
 
       attr_reader :lookup, :message_class
+
+      # Compare the class a type replaced with the one holding it, once the latter has a name.
+      def check!(key)
+        replaced = @replaced[key]
+        return unless replaced
+
+        current = @lookup[key]
+        return unless named(current)
+
+        @replaced.delete(key)
+        duplicate!(key, replaced, current) unless named(current) == named(replaced)
+      end
+
+      # A class's permanent name. A constant set in an anonymous module has a
+      # temporary one (+"#<Class:0x...>::Foo"+) until the module is named.
+      def named(klass)
+        name = klass.name
+        name unless name.nil? || name.start_with?('#<')
+      end
+
+      def duplicate!(key, registered, klass)
+        raise DuplicateTypeError, "message type #{key.inspect} is claimed by both #{registered.name} and #{klass.name}"
+      end
     end
 
     # @return [Registry] the message type registry for this class
