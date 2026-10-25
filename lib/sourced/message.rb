@@ -286,7 +286,9 @@ module Sourced
     #   target.
     # - +Integer+ — interpreted as seconds; added to +Time.now+.
     # - +String+ — parsed via +Fugit.parse_duration+ as a duration (e.g.
-    #   +'5m'+, +'1h30m'+, +'PT5M'+) and added to +Time.now+.
+    #   +'5m'+, +'1h30m'+, +'PT5M'+), up to weeks, and its seconds added to
+    #   +Time.now+. Months and years aren't a fixed number of seconds, so
+    #   they raise +ArgumentError+.
     #
     # Raises {PastMessageDateError} when the resolved target is
     # before +created_at+.
@@ -295,11 +297,7 @@ module Sourced
                when Integer
                  Time.now + value
                when String
-                 parsed = Fugit.parse_duration(value) or
-                   raise ArgumentError,
-                         "Message#at: String argument must be an ISO8601 / Fugit duration " \
-                         "(e.g. '5m', 'PT1H30M'); got #{value.inspect}"
-                 parsed.add_to_time(Time.now).to_local_time
+                 Time.now + duration_seconds(value)
                else
                  value
                end
@@ -374,6 +372,21 @@ module Sourced
       attrs[:correlation_id] = attrs[:id] unless attrs[:correlation_id]
       attrs[:causation_id] = attrs[:id] unless attrs[:causation_id]
       attrs
+    end
+
+    # A duration string's seconds, up to weeks.
+    def duration_seconds(value)
+      duration = Fugit.parse_duration(value) or
+        raise ArgumentError,
+              "Message#at: String argument must be an ISO8601 / Fugit duration " \
+              "(e.g. '5m', 'PT1H30M'); got #{value.inspect}"
+      if duration.h.key?(:yea) || duration.h.key?(:mon)
+        raise ArgumentError,
+              "Message#at: can't delay by months or years, which vary in length; " \
+              "give days (e.g. '30d'); got #{value.inspect}"
+      end
+
+      duration.to_sec
     end
   end
 

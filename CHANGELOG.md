@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+- `Message#at` with a duration string (`'1h30m'`) raised `ArgumentError` ("Cannot
+  determine timezone from \"BST\"") in the hour the clocks go back. The duration's
+  seconds are now added to `Time.now`, exactly. Durations in months or years, which
+  aren't a fixed number of seconds, raise `ArgumentError`.
 - `Message::Registry` raises `DuplicateTypeError` when two classes with different names
   claim one type string, instead of silently replacing the registered class. Registering
   a type again is still allowed when the names are equal (a code reloader redefining a

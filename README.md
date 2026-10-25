@@ -372,10 +372,11 @@ Scheduling a message into the past raises `Sourced::Message::PastMessageDateErro
 msg.at(Time.now - 60) # => raises Sourced::Message::PastMessageDateError
 ```
 
-Passing a string that isn't a duration (e.g. an absolute date) raises `ArgumentError`:
+Passing a string that isn't a duration (e.g. an absolute date) raises `ArgumentError`, as does a duration in months or years, which vary in length (give days instead):
 
 ```ruby
 msg.in('2026-12-31T10:00:00') # => raises ArgumentError
+msg.in('1M')                  # => raises ArgumentError; msg.in('30d') instead
 ```
 
 ### Pattern matching with `case`/`when`

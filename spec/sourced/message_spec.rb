@@ -293,6 +293,26 @@ RSpec.describe Sourced::Message do
       expect(delayed.created_at).to be_within(1).of(before + 90 * 60)
     end
 
+    it 'adds a duration String in the hour the clocks go back' do
+      tz = ENV['TZ']
+      ENV['TZ'] = 'Europe/London'
+      # 01:30 BST, which happens again an hour later as 01:30 GMT.
+      now = Time.utc(2026, 10, 25, 0, 30).getlocal
+      allow(Time).to receive(:now).and_return(now)
+
+      delayed = bare_class.new.at('1h30m')
+      expect(delayed.created_at).to eq(now + 90 * 60)
+    ensure
+      ENV['TZ'] = tz
+    end
+
+    it 'raises ArgumentError for a duration in months or years' do
+      msg = bare_class.new
+      %w[1M P1M 1y P1Y1D].each do |value|
+        expect { msg.at(value) }.to raise_error(ArgumentError, /can't delay by months or years/)
+      end
+    end
+
     it 'raises ArgumentError when the String is not a duration (e.g. a date)' do
       msg = bare_class.new
       expect {
