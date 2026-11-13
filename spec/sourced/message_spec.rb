@@ -255,7 +255,7 @@ RSpec.describe Sourced::Message do
       msg = bare_class.new
       future = Time.now + 60
       delayed = msg.at(future)
-      expect(delayed.created_at).to eq(future)
+      expect(delayed.created_at).to eq(future.floor(6))
       expect(delayed.id).to eq(msg.id)
     end
 
