@@ -62,7 +62,9 @@ module Sourced
     attribute :type, Types::String.present
     attribute? :causation_id, Types::UUID::V4
     attribute? :correlation_id, Types::UUID::V4
-    attribute :created_at, LaxTime.default { Time.now }
+    # Kept to the microsecond, as Plumb::Codec::JSON encodes it, so a message equals
+    # itself read back from JSON (Linux clocks have nanoseconds).
+    attribute :created_at, LaxTime.default { Time.now }.transform(::Time) { |t| t.floor(6) }
     attribute :metadata, Types::Metadata.default(Plumb::BLANK_HASH)
     # Envelope, not payload: {#correlate} leaves the target's tags alone, so they
     # never pass on to messages produced in reaction.

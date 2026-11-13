@@ -71,6 +71,23 @@ RSpec.describe Sourced::Message::JSONCodec do
       expect(decoded.created_at).to be_a(Time)
     end
 
+    it 'returns a message equal to the original, whose created_at had nanoseconds' do
+      nanoseconds = Time.at(1_735_689_600, 123_456_789, :nsec)
+      allow(Time).to receive(:now).and_return(nanoseconds)
+      payload = message.payload.to_h
+
+      [
+        rich.new(payload:),                          # created_at defaults to Time.now
+        rich.new(payload:, created_at: nanoseconds), # set by the caller
+        rich.new(payload:).with(created_at: nanoseconds + 60),
+        rich.new(payload:).at(nanoseconds + 60),
+        rich.new(payload:).at('1m')
+      ].each do |original|
+        json = JSON.generate(codec.encode(original))
+        expect(codec.decode(JSON.parse(json))).to eq(original)
+      end
+    end
+
     it 'survives a real JSON round trip, which is what a transport does' do
       json = JSON.generate(codec.encode(message))
       decoded = codec.decode(JSON.parse(json, symbolize_names: true))

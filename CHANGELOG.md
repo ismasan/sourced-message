@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+- `Message#created_at` is kept to the microsecond, the precision `Plumb::Codec::JSON`
+  encodes, so a message equals itself read back from JSON. On Linux, `Time.now` has
+  nanoseconds, so a message and its stored copy differed in `created_at`. Every way of
+  setting it is truncated: the default, a `created_at:` passed in, `#with` and `#at`.
 - `Message#at` with a duration string (`'1h30m'`) raised `ArgumentError` ("Cannot
   determine timezone from \"BST\"") in the hour the clocks go back. The duration's
   seconds are now added to `Time.now`, exactly. Durations in months or years, which
