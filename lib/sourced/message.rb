@@ -58,6 +58,38 @@ module Sourced
     DuplicateTypeError = Class.new(ArgumentError)
     LaxTime = Types::Time | Types::String.build(::Time, :parse).policy(:rescue, ::ArgumentError)
 
+    # Messages are immutable all the way down: a message's attribute values,
+    # and the strings, arrays, hashes and sets in them, are frozen. Unfrozen
+    # values are copied, not frozen in place, so a caller's own array passed
+    # in a payload stays theirs. Structs (+Plumb::Attributes+) are left as
+    # they are: payload structs ({Payload} and nested +attribute :x do+
+    # blocks) freeze their own values.
+    module DeepFreeze
+      # @param value [Object]
+      # @return [Object] +value+, or a frozen copy of it
+      def self.call(value)
+        case value
+        when ::String then value.frozen? ? value : -value
+        when ::Array then same_or(value, value.map { |v| call(v) })
+        when ::Hash then hash(value)
+        when ::Set then value.frozen? && value.all? { |v| call(v).equal?(v) } ? value : ::Set.new(value.map { |v| call(v) }).freeze
+        else value
+        end
+      end
+
+      # @param value [Hash]
+      # @return [Hash] frozen, with frozen values
+      def self.hash(value)
+        copy = value.transform_values { |v| call(v) }
+        value.frozen? && copy.all? { |k, v| v.equal?(value[k]) } ? value : copy.freeze
+      end
+
+      def self.same_or(value, copy)
+        value.frozen? && copy.each_with_index.all? { |v, i| v.equal?(value[i]) } ? value : copy.freeze
+      end
+      private_class_method :same_or
+    end
+
     attribute :id, Types::AutoUUID
     attribute :type, Types::String.present
     attribute? :causation_id, Types::UUID::V4
@@ -173,13 +205,22 @@ module Sourced
     end
 
     # Base class for typed message payloads.
+    #
+    # Frozen all the way down (see {DeepFreeze}), as are the structs its nested
+    # +attribute :x do+ blocks define, which subclass it.
     class Payload < Plumb::Types::Data
+      def self.__plumb_struct_class__ = Payload
+
       # @param key [Symbol] attribute name
       # @return [Object] attribute value
       def [](key) = attributes[key]
 
       # @see Hash#fetch
       def fetch(...) = to_h.fetch(...)
+
+      private
+
+      def prepare_attributes(attrs) = DeepFreeze.hash(attrs)
     end
 
     # Define a new message type. Registers it in the {.registry} and
@@ -369,11 +410,12 @@ module Sourced
     private
 
     # Hook called by Plumb after schema parsing, when +:id+ has been resolved.
-    # Defaults +causation_id+ and +correlation_id+ to the message's own +id+.
+    # Defaults +causation_id+ and +correlation_id+ to the message's own +id+,
+    # and freezes the attributes (see {DeepFreeze}).
     def prepare_attributes(attrs)
       attrs[:correlation_id] = attrs[:id] unless attrs[:correlation_id]
       attrs[:causation_id] = attrs[:id] unless attrs[:causation_id]
-      attrs
+      DeepFreeze.hash(attrs)
     end
 
     # A duration string's seconds, up to weeks.

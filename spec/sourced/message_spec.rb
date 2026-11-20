@@ -83,6 +83,59 @@ RSpec.describe Sourced::Message do
     end
   end
 
+  describe 'immutability' do
+    let(:list_class) do
+      Sourced::Message.define('spec.list_set') do
+        attribute :items, Plumb::Types::Array[Plumb::Types::String]
+        attribute :index, Plumb::Types::Hash
+        attribute :address do
+          attribute :lines, Plumb::Types::Array[Plumb::Types::String]
+        end
+      end
+    end
+
+    let(:msg) do
+      list_class.new(
+        payload: { items: ['a'], index: { k: ['v'] }, address: { lines: ['l1'] } },
+        metadata: { trace: { hops: ['x'] } }
+      )
+    end
+
+    it 'freezes payload values all the way down' do
+      expect(msg.payload.items).to be_frozen
+      expect(msg.payload.items.first).to be_frozen
+      expect(msg.payload.index).to be_frozen
+      expect(msg.payload.index[:k]).to be_frozen
+      expect { msg.payload.items << 'b' }.to raise_error(FrozenError)
+    end
+
+    it 'freezes nested payload structs' do
+      expect(msg.payload.address).to be_a(Sourced::Message::Payload)
+      expect(msg.payload.address.lines).to be_frozen
+    end
+
+    it 'freezes metadata and tags' do
+      expect(msg.metadata).to be_frozen
+      expect(msg.metadata[:trace][:hops]).to be_frozen
+      expect(msg.with_tags(region: 'eu').tags).to be_frozen
+    end
+
+    it 'copies a caller\'s values instead of freezing them' do
+      items = [+'a']
+      list_class.new(payload: { items:, index: {}, address: { lines: [] } })
+
+      expect(items).not_to be_frozen
+      expect(items.first).not_to be_frozen
+    end
+
+    it 'stays frozen through #with and #correlate' do
+      copy = msg.with(metadata: { n: [1] })
+      expect(copy.metadata[:n]).to be_frozen
+      expect(copy.payload.items).to be_frozen
+      expect(msg.correlate(copy).metadata).to be_frozen
+    end
+  end
+
   describe '#payload' do
     let(:msg) { msg_class.new(payload: { name: 'Joe', email: 'joe@example.com' }) }
 
